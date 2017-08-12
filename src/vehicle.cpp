@@ -11,6 +11,7 @@ Vehicle::Vehicle(const Vehicle &other) {
   y_ = other.y_;
   vx_ = other.vx_;
   vy_ = other.vy_;
+  v_ = other.v_;
   a_ = other.a_;
   s_ = other.s_;
   d_ = other.d_;
@@ -19,28 +20,27 @@ Vehicle::Vehicle(const Vehicle &other) {
   lane_ = other.lane_;
   length_ = other.length_;
   yaw_ = other.yaw_;
+  max_acceleration_ = other.max_acceleration_;
 }
 
-Vehicle::PredictionState Vehicle::stateAt(double t) {
+Vehicle::PredictionState Vehicle::stateAt(double t) const {
   // We assume the vehicle stays in its current lane
   PredictionState prediction;
-  double s = s_ + v_ * t + a_ * t * t / 2;
-  double v = v_ + a_ * t;
   prediction.lane = lane_;
-  prediction.s = s;
+  prediction.s = s_ + v_ * t + a_ * t * t / 2;
   prediction.d = d_;
-  prediction.v = v;
+  prediction.v = v_ + a_ * t;
   prediction.a = a_;
   return prediction;
 }
 
-bool Vehicle::collidesWith(Vehicle other, int at_time) {
+bool Vehicle::collidesWith(Vehicle other, int at_time) const {
     PredictionState p1 = stateAt(at_time);
     PredictionState p2 = other.stateAt(at_time);
     return (p1.lane == p2.lane) && (fabs(p1.s-p2.s) <= length_);
 }
 
-Vehicle::Collider Vehicle::willCollideWith(Vehicle other, int timesteps, double time_increment) {
+Vehicle::Collider Vehicle::willCollideWith(Vehicle other, int timesteps, double time_increment) const {
 	Vehicle::Collider colliderTemp;
 	colliderTemp.collision = false;
 	colliderTemp.time = -1;
@@ -56,7 +56,7 @@ Vehicle::Collider Vehicle::willCollideWith(Vehicle other, int timesteps, double 
 	return colliderTemp;
 }
 
-void Vehicle::display() {
+void Vehicle::display() const {
   cout << "*** Vehicle ***" << endl;
   cout << "id:\t\t" << id_ << endl;
   cout << "x:\t\t" << x_ << endl;

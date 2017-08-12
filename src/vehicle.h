@@ -52,7 +52,7 @@ public:
   // Vehicle length in meters
   double length_ = 4.5;
   // Max acceleration in m/s^2
-  double max_acceleration_ = 20;
+  double max_acceleration_ = 7;
 
   Vehicle();
 
@@ -60,16 +60,16 @@ public:
 
   // Return the predicated state of the car for the given relative time
   // t is in seconds
-  PredictionState stateAt(double t);
+  PredictionState stateAt(double t) const;
 
   // Tests collision between this vehicle and another one at a given time in seconds
-  bool collidesWith(Vehicle other, int at_time);
+  bool collidesWith(Vehicle other, int at_time) const;
 
   // Tests collision between this cehicle and another one for a given time interval in seconds
-  Collider willCollideWith(Vehicle other, int timesteps, double time_increment);
+  Collider willCollideWith(Vehicle other, int timesteps, double time_increment) const;
 
   // Print out human readable representation of the Vehicle
-  void display();
+  void display() const;
 };
 
 #endif // VEHICLE_H

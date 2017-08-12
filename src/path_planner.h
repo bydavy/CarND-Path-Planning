@@ -20,12 +20,15 @@ private:
   Road& road_;
   Vehicle& ego_;
   State state_;
+  int targetLaneId_;
   // Updates the state if the internal machine state
   void updateState(vector<Vehicle> others);
   void realizeKeepLane(vector<Vehicle> others,
     vector<double>& prev_x_vals, vector<double>& prev_y_vals,
+    double end_path_s, double end_path_d,
     vector<double>& next_x_vals, vector<double>& next_y_vals);
-  double maxAccelForLane(vector<Vehicle> others);
+  bool canChangeLane(vector<Vehicle> others, Vehicle::PredictionState state,
+    double delta_t, int target_lane);
 
 public:
   PathPlanner(Road& road, Vehicle& vehicle);
@@ -33,8 +36,9 @@ public:
   void setEgoVehicleData(double car_x, double car_y, double car_s, double car_d,
     double car_yaw, double car_speed);
   void update(vector<Vehicle> others,
-    vector<double>& prev_x_vals, vector<double>& prev_y_vals,
-    vector<double>& next_x_vals, vector<double>& next_y_vals);
+    vector<double>& prev_x_vals, vector<double>& prev_y_vals, double end_path_s,
+    double end_path_d, vector<double>& next_x_vals,
+    vector<double>& next_y_vals);
 };
 
 #endif // PATH_PLANNER_H

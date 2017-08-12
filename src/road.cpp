@@ -3,7 +3,7 @@
 // During simulation we know we've 3 lanes everywhere in the track
 const int LANE_COUNT = 3;
 // Lane width in meter
-const int LANE_WIDTH = 4;
+const double LANE_WIDTH = 4;
 // Lane ids
 const int LANE_IDS[] = {
   0, // Left lane

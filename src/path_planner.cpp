@@ -2,6 +2,7 @@
 #include <iostream>
 #include <math.h>
 #include "utility.h"
+#include "spline.h"
 
 using namespace std;
 
@@ -10,19 +11,24 @@ const double PREDICTION_TIMESTEP = 0.02; // 20ms
 const double PREDICTIONS_PER_SECOND = 1/PREDICTION_TIMESTEP;
 // How many steps in the future to predict the car behavior
 const int PREDICTION_STEPS = PREDICTIONS_PER_SECOND;
+// in meters
+const double PREDICTION_DISTANCE = 30;
+// in km/h
+const double LEGAL_VELOCITY_PADDING = 2;
 
 PathPlanner::PathPlanner(Road& road, Vehicle& vehicle):
-  state_(State::KEEP_LANE),road_(road),ego_(vehicle) {}
+  state_(State::KEEP_LANE),road_(road),ego_(vehicle),
+  targetLaneId_(Road::LANE_NOT_FOUND) {}
 
 void PathPlanner::setEgoVehicleData(double car_x, double car_y, double car_s,
-  double car_d, double car_yaw, double car_speed) {
-    ego_.x_ = car_x;
-    ego_.y_ = car_y;
-    ego_.s_ = car_s;
-    ego_.d_ = car_d;
-    ego_.yaw_ = car_yaw;
-    ego_.v_ = car_speed;
-    ego_.lane_ = road_.getLaneId(car_s, car_d);
+    double car_d, double car_yaw, double car_speed) {
+  ego_.x_ = car_x;
+  ego_.y_ = car_y;
+  ego_.s_ = car_s;
+  ego_.d_ = car_d;
+  ego_.yaw_ = car_yaw;
+  ego_.v_ = car_speed;
+  ego_.lane_ = road_.getLaneId(car_s, car_d);
 }
 
 void PathPlanner::updateState(vector<Vehicle> others) {
@@ -31,14 +37,14 @@ void PathPlanner::updateState(vector<Vehicle> others) {
 }
 
 void PathPlanner::update(vector<Vehicle> others,
-  vector<double>& prev_x_vals, vector<double>& prev_y_vals,
-  double end_path_s, double end_path_d,
-  vector<double>& next_x_vals, vector<double>& next_y_vals) {
+    vector<double>& prev_x_vals, vector<double>& prev_y_vals,
+    double end_path_s, double end_path_d,
+    vector<double>& next_x_vals, vector<double>& next_y_vals) {
   // Initialize target lane
   if (targetLaneId_ == Road::LANE_NOT_FOUND) {
     targetLaneId_ = road_.getLaneId(ego_.s_, ego_.d_);
     if (targetLaneId_ == Road::LANE_NOT_FOUND) {
-      targetLaneId_ = 0;
+      targetLaneId_ = 0; // Fallback to line 0
     }
   }
 
@@ -52,95 +58,192 @@ void PathPlanner::update(vector<Vehicle> others,
   }
 }
 
-double PathPlanner::maxAccelForLane(vector<Vehicle> others) {
-  vector<Vehicle> in_front;
+bool PathPlanner::canChangeLane(vector<Vehicle> others, Vehicle::PredictionState state,
+    double delta_t, int target_lane) {
+  if (target_lane == Road::LANE_NOT_FOUND) {
+    return false;
+  }
+
   for(auto const& v: others) {
-    if((v.lane_ == ego_.lane_) && (v.s_ > ego_.s_)) {
-      in_front.push_back(v);
+    if(v.lane_ != target_lane) { // Ignore if not same lane
+      continue;
+    }
+
+    const double s = v.stateAt(delta_t).s;
+    // Vehicle behind or in front on target lane
+    if ((s < state.s && state.s - s < 5) ||
+      (s > state.s && s - state.s < 20)) {
+        return false;
     }
   }
 
-  double delta_v_til_target = road_.getSpeedLimit(ego_.s_, ego_.d_) - ego_.v_;
-  double max_acc = fmin(ego_.max_acceleration_, delta_v_til_target);
-  cout << "Max acc: " << max_acc << endl;
-
-  if (in_front.size() > 0) { // Avoid collision
-    Vehicle vehicle = in_front[0];
-    Vehicle::Collider collider = ego_.willCollideWith(vehicle, 50, 0.02);
-    if (collider.collision) {
-      // We should slow down
-      long distance = vehicle.s_ - ego_.s_;
-      long delta_v_til_collision = vehicle.v_ - ego_.v_;
-    }
-  }
-
-  return max_acc;
+  return true;
 }
 
 void PathPlanner::realizeKeepLane(vector<Vehicle> others,
-  vector<double>& prev_x_vals, vector<double>& prev_y_vals,
-  double end_path_s, double end_path_d,
-  vector<double>& next_x_vals, vector<double>& next_y_vals) {
-  int prev_size = prev_x_vals.size();
+    vector<double>& prev_x_vals, vector<double>& prev_y_vals,
+    double end_path_s, double end_path_d,
+    vector<double>& next_x_vals, vector<double>& next_y_vals) {
+  const int prev_size = prev_x_vals.size();
 
-  double s = ego_.s_;
-  double d = 0;
-  double v = ego_.v_;
-  double a = 20;
+  vector<double> ptsx;
+  vector<double> ptsy;
 
-  if (prev_size > 3) {
+  double prev_car_x;
+  double prev_car_y;
+
+  // Reference car position used to complete the path
+  // This might be the current car position (bootstrap), or a prediction
+  double ref_x;
+  double ref_y;
+  double ref_s;
+  double ref_d;
+  double ref_yaw;
+  double ref_v;
+  double ref_t = prev_size * PREDICTION_TIMESTEP;
+
+  if (prev_size < 2) {
+    // Fake previous position one second ago based on yaw
+    prev_car_x = ego_.x_ - cos(ego_.yaw_);
+    prev_car_y = ego_.y_ - sin(ego_.yaw_);
+
+    // Current position
+    ref_x = ego_.x_;
+    ref_y = ego_.y_;
+    ref_s = ego_.s_;
+    ref_d = ego_.d_;
+    ref_yaw = ego_.yaw_;
+    ref_v = ego_.v_;
+  } else {
     // Copy previous path
+    // The more entries we copy the more our car will take time to react
+    // to environment changes, as this path is based on predictions.
     for (int i = 0; i < prev_size; i++) {
       next_x_vals.push_back(prev_x_vals[i]);
       next_y_vals.push_back(prev_y_vals[i]);
     }
 
-    // Update starting vehicle state
-    double x_0 = next_x_vals[prev_size-3];
-    double y_0 = next_y_vals[prev_size-3];
-    double x_1 = next_x_vals[prev_size-2];
-    double y_1 = next_y_vals[prev_size-2];
-    double x_2 = next_x_vals[prev_size-1];
-    double y_2 = next_y_vals[prev_size-1];
-    double vx_1 = (x_1 - x_0) * PREDICTIONS_PER_SECOND;
-    double vy_1 = (y_1 - y_0) * PREDICTIONS_PER_SECOND;
-    double v_1 = sqrt(vx_1*vx_1 + vy_1*vy_1);
+    // Previous position (second to last entry in previous path)
+    prev_car_x = prev_x_vals[prev_size-2];
+    prev_car_y = prev_y_vals[prev_size-2];
 
-    double vx_2 = (x_2 - x_1) * PREDICTIONS_PER_SECOND;
-    double vy_2 = (y_2 - y_1) * PREDICTIONS_PER_SECOND;
-    double v_2 = sqrt(vx_2*vx_2 + vy_2*vy_2);
-
-    s = end_path_s;
-    //d = end_path_d;
-    v = v_2;
-    a = (v_2 - v_1) / PREDICTION_TIMESTEP;
+    // Current position (last entry in previous path)
+    ref_x = prev_x_vals[prev_size-1];
+    ref_y = prev_y_vals[prev_size-1];
+    ref_s = end_path_s;
+    ref_d = end_path_d;
+    ref_yaw = atan2(ref_y - prev_car_y, ref_x - prev_car_x);
+    ref_v = distance(prev_car_x, prev_car_y, ref_x, ref_y) / PREDICTION_TIMESTEP;
   }
 
-  // Starting delta time for prediction
-  double t = prev_size * PREDICTION_TIMESTEP;
-  int pred_steps = min(PREDICTION_STEPS - prev_size, 0);
-
-  for (int i = 0; i < pred_steps; i++) {
-    // Solve s
-    a = 20;
-    double v1 = v + a * PREDICTION_TIMESTEP;
-    if (v1 > 20) {
-      v1 = 20;
+  // Detect if we will collide a car soon
+  Vehicle* inFront = NULL;
+  for(auto const& v: others) {
+    if(v.lane_ != ego_.lane_) { // Ignore if not same lane
+      continue;
     }
-    double delta_s = (v1 + v) / 2 * PREDICTION_TIMESTEP;
 
-    // Update states
-    s += delta_s;
-    v = v1;
+    const double s = v.stateAt(ref_t).s;
+    if (s > ref_s && (s - ref_s < 30)) {
+      if (inFront == NULL || inFront->stateAt(ref_t).s > s) {
+        inFront = new Vehicle(v);
+        cout << "Collision!!!" << endl;
+        cout << "ego_.lane_: " << ego_.lane_ << ", targetLaneId_: " << targetLaneId_ << endl;
+      }
+    }
+  }
 
-    // Solve d
-    double target_d = road_.getLaneCenter(s, targetLaneId_);
+  // Should we change lane?
+  if (inFront != NULL && ego_.lane_ == targetLaneId_) {
+    Vehicle::PredictionState pred_state;
+    pred_state.lane = ego_.lane_;
+    pred_state.s = ref_s;
+    pred_state.d = ref_d;
+    pred_state.v = ref_v;
+    pred_state.a = 0;
 
-    vector<double> pts = getXY(s, target_d, road_.map_waypoints_s_,
+    const int left_lane = road_.getLaneLeftTo(ego_.lane_, ref_s);
+    const int right_lane = road_.getLaneRightTo(ego_.lane_, ref_s);
+    if (canChangeLane(others, pred_state, ref_t, left_lane)) {
+      targetLaneId_ = left_lane;
+    } else if (canChangeLane(others, pred_state, ref_t, right_lane)) {
+      targetLaneId_ = right_lane;
+    }
+  }
+
+  // Target speed
+  double target_v = road_.getSpeedLimit(ref_s, ref_d);
+  if (inFront != NULL) { // Collision! Adapt speed to vehicle in front of us
+    target_v = min(target_v, inFront->v_);
+  }
+
+  // Previous position
+  ptsx.push_back(prev_car_x);
+  ptsy.push_back(prev_car_y);
+
+  // Current position
+  ptsx.push_back(ref_x);
+  ptsy.push_back(ref_y);
+
+  // Add 3 waypoints spread out, to estimate the road curvature with spline
+  for (int i = 1; i < 4; i++) {
+    double s = ref_s + PREDICTION_DISTANCE * i;
+    double d = road_.getLaneCenter(targetLaneId_, s);
+    vector<double> next_waypoint = getXY(s, d, road_.map_waypoints_s_,
       road_.map_waypoints_x_, road_.map_waypoints_y_);
-    next_x_vals.push_back(pts[0]);
-    next_y_vals.push_back(pts[1]);
 
-    t += PREDICTION_TIMESTEP;
+    ptsx.push_back(next_waypoint[0]);
+    ptsy.push_back(next_waypoint[1]);
+  }
+
+  // Convert from map to car coordinates system
+  // This will solve a problem with spline and a vertical curvature generating
+  // mutiple y for a single x.
+  for (int i = 0; i < ptsx.size(); i++) {
+    const double shift_x = ptsx[i] - ref_x;
+    const double shift_y = ptsy[i] - ref_y;
+
+    ptsx[i] = shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw);
+    ptsy[i] = shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw);
+  }
+
+  tk::spline s;
+  s.set_points(ptsx, ptsy);
+
+  const double target_x = PREDICTION_DISTANCE;
+  const double target_y = s(target_x);
+  const double target_dist = sqrt(target_x*target_x + target_y*target_y);
+
+  // Position relative to reference car position {ref_x, ref_y}
+  double x = 0;
+  double v = ref_v;
+
+  // Starting delta time for prediction
+  const int pred_steps = max(PREDICTION_STEPS - prev_size, 0);
+  for (int i = 0; i < pred_steps; i++) {
+    // Update velocity (update only if too far from target_v)
+    if (v < target_v - LEGAL_VELOCITY_PADDING || v >= target_v) {
+      double a = ego_.max_acceleration_ * PREDICTION_TIMESTEP;
+      if (v > target_v) { // Decelerate
+        a = -a;
+      }
+      v += a;
+      v = min(v, target_v - LEGAL_VELOCITY_PADDING);
+    }
+    const double n = target_dist / (v*PREDICTION_TIMESTEP);
+    x += target_x / n;
+    const double y = s(x);
+
+    // Convert from car to map coordinates system
+    const double x_map = ref_x + (x * cos(ref_yaw-0) - y * sin(ref_yaw-0));
+    const double y_map = ref_y + (x * sin(ref_yaw-0) + y * cos(ref_yaw-0));
+
+    next_x_vals.push_back(x_map);
+    next_y_vals.push_back(y_map);
+  }
+
+  if (inFront != NULL) {
+    free(inFront);
+    inFront = NULL;
   }
 }

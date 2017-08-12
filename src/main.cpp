@@ -113,14 +113,15 @@ int main() {
         string event = j[0].get<string>();
 
         if (event == "telemetry") {
-          // j[1] is the data JSON object
+          	// j[1] is the data JSON object
 
-        	// Main car's localization Data
+          	// Main car's localization Data
           	double car_x = j[1]["x"];
           	double car_y = j[1]["y"];
           	double car_s = j[1]["s"];
           	double car_d = j[1]["d"];
           	double car_yaw = j[1]["yaw"];
+          	car_yaw = deg2rad(car_yaw); // deg to radian
           	double car_speed = j[1]["speed"]; // mph to m/s conversion
           	car_speed *= MPH2MS;
 
