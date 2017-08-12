@@ -71,7 +71,7 @@ bool PathPlanner::canChangeLane(vector<Vehicle> others, Vehicle::PredictionState
 
     const double s = v.stateAt(delta_t).s;
     // Vehicle behind or in front on target lane
-    if ((s < state.s && state.s - s < 5) ||
+    if ((s < state.s && state.s - s < 7) ||
       (s > state.s && s - state.s < 20)) {
         return false;
     }
@@ -228,7 +228,6 @@ void PathPlanner::realizeKeepLane(vector<Vehicle> others,
         a = -a;
       }
       v += a;
-      v = min(v, target_v - LEGAL_VELOCITY_PADDING);
     }
     const double n = target_dist / (v*PREDICTION_TIMESTEP);
     x += target_x / n;
