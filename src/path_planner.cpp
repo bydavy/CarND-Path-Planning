@@ -10,7 +10,7 @@ using namespace std;
 const double PREDICTION_TIMESTEP = 0.02; // 20ms
 const double PREDICTIONS_PER_SECOND = 1/PREDICTION_TIMESTEP;
 // How many steps in the future to predict the car behavior
-const int PREDICTION_STEPS = PREDICTIONS_PER_SECOND;
+const int PREDICTION_STEPS = 45;
 // in meters
 const double PREDICTION_DISTANCE = 30;
 // in km/h
