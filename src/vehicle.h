@@ -52,7 +52,7 @@ public:
   // Vehicle length in meters
   double length_ = 4.5;
   // Max acceleration in m/s^2
-  double max_acceleration_ = 7;
+  double max_acceleration_ = 6;
 
   Vehicle();
 
