@@ -31,9 +31,35 @@ void PathPlanner::setEgoVehicleData(double car_x, double car_y, double car_s,
   ego_.lane_ = road_.getLaneId(car_s, car_d);
 }
 
-void PathPlanner::updateState(vector<Vehicle> others) {
-  // TODO Implement the state selection logic
-  state_ = State::KEEP_LANE;
+State PathPlanner::stateTransition(vector<Vehicle> others) {
+  State best_next_state = State::KEEP_LANE;
+  double min_cost = std::numeric_limits<double>::max();
+
+  vector<State> possible_successor_states = successorStates(state_);
+
+  for(State state: possible_successor_states) {
+    // FIXME Generate rough trajectory
+    // FIXME Compute cost for given trajectory
+    double cost = 0;
+
+    if (cost < min_cost) {
+      min_cost = cost;
+      best_next_state = state;
+    }
+  }
+
+  return best_next_state;
+}
+
+vector<State> PathPlanner::successorStates(State current_state) {
+  vector<State> result;
+  // We can go from any state to any other state
+  for (State state: all_state) {
+    if (current_state != state) {
+      result.push_back(state);
+    }
+  }
+  return result;
 }
 
 void PathPlanner::update(vector<Vehicle> others,
@@ -48,31 +74,30 @@ void PathPlanner::update(vector<Vehicle> others,
     }
   }
 
-  updateState(others);
+  // Save previous state into stack
+  State previous_state = state_;
+  state_ = stateTransition(others);
 
-  if (State::KEEP_LANE == state_) {
-      realizeKeepLane(others, prev_x_vals, prev_y_vals, end_path_s, end_path_d,
-        next_x_vals, next_y_vals);
-  } else {
-    cout << "Unknown state: " << state_ << endl;
-  }
+  realizeState(previous_state, others, prev_x_vals, prev_y_vals, end_path_s,
+    end_path_d, next_x_vals, next_y_vals);
 }
 
-bool PathPlanner::canChangeLane(vector<Vehicle> others, Vehicle::PredictionState state,
-    double delta_t, int target_lane) {
+bool PathPlanner::canChangeLane(vector<Vehicle> others,
+    Vehicle::PredictionState state, double delta_t, int target_lane) {
   if (target_lane == Road::LANE_NOT_FOUND) {
     return false;
   }
 
-  for(auto const& v: others) {
+  for(Vehicle const& v: others) {
     if(v.lane_ != target_lane) { // Ignore if not same lane
       continue;
     }
 
     const double s = v.stateAt(delta_t).s;
-    // Vehicle behind or in front on target lane
-    if ((s < state.s && state.s - s < 7) ||
-      (s > state.s && s - state.s < 20)) {
+    const double dist = fabs(s - state.s);
+    bool inFront = state.s < s && dist < 20;
+    bool behind = state.s > s && dist < 10;
+    if (inFront || behind) {
         return false;
     }
   }
@@ -80,7 +105,7 @@ bool PathPlanner::canChangeLane(vector<Vehicle> others, Vehicle::PredictionState
   return true;
 }
 
-void PathPlanner::realizeKeepLane(vector<Vehicle> others,
+void PathPlanner::realizeState(State previous_state, vector<Vehicle> others,
     vector<double>& prev_x_vals, vector<double>& prev_y_vals,
     double end_path_s, double end_path_d,
     vector<double>& next_x_vals, vector<double>& next_y_vals) {
@@ -138,23 +163,30 @@ void PathPlanner::realizeKeepLane(vector<Vehicle> others,
 
   // Detect if we will collide a car soon
   Vehicle* inFront = NULL;
+  Vehicle* inFrontCollision = NULL;
   for(auto const& v: others) {
-    if(v.lane_ != ego_.lane_) { // Ignore if not same lane
+    if(v.lane_ != ego_.lane_ && v.lane_ != targetLaneId_) { // Ignore if not same lane
       continue;
     }
 
     const double s = v.stateAt(ref_t).s;
-    if (s > ref_s && (s - ref_s < 30)) {
+    if (s > ref_s && (s - ref_s < 30)) { // A car in front of us
       if (inFront == NULL || inFront->stateAt(ref_t).s > s) {
         inFront = new Vehicle(v);
-        cout << "Collision!!!" << endl;
-        cout << "ego_.lane_: " << ego_.lane_ << ", targetLaneId_: " << targetLaneId_ << endl;
+      }
+    }
+
+    if (s > ref_s && (s - ref_s < 7)) { // An iminante collision
+      if (inFrontCollision == NULL || inFrontCollision->stateAt(ref_t).s > s) {
+        inFrontCollision = new Vehicle(v);
       }
     }
   }
 
   // Should we change lane?
-  if (inFront != NULL && ego_.lane_ == targetLaneId_) {
+  time_t now = time(NULL);
+  if (inFront != NULL && ego_.lane_ == targetLaneId_ &&
+      difftime(now, lastLaneChange_) > 5 /* seconds */) {
     Vehicle::PredictionState pred_state;
     pred_state.lane = ego_.lane_;
     pred_state.s = ref_s;
@@ -166,8 +198,10 @@ void PathPlanner::realizeKeepLane(vector<Vehicle> others,
     const int right_lane = road_.getLaneRightTo(ego_.lane_, ref_s);
     if (canChangeLane(others, pred_state, ref_t, left_lane)) {
       targetLaneId_ = left_lane;
+      lastLaneChange_ = time(NULL);
     } else if (canChangeLane(others, pred_state, ref_t, right_lane)) {
       targetLaneId_ = right_lane;
+      lastLaneChange_ = time(NULL);
     }
   }
 
@@ -244,5 +278,10 @@ void PathPlanner::realizeKeepLane(vector<Vehicle> others,
   if (inFront != NULL) {
     free(inFront);
     inFront = NULL;
+  }
+
+  if (inFrontCollision != NULL) {
+    free(inFrontCollision);
+    inFrontCollision = NULL;
   }
 }
