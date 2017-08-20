@@ -14,14 +14,13 @@ private:
   Vehicle& ego_;
   int targetLaneId_;
   time_t lastLaneChange_;
-  bool canChangeLane(vector<Vehicle> others, Vehicle::PredictionState state,
-    double delta_t, int target_lane);
+  bool canChangeLane(Vehicle ego, vector<Vehicle> others, double delta_t,
+    int target_lane);
 
 public:
   PathPlanner(Road& road, Vehicle& vehicle);
 
-  void setEgoVehicleData(double car_x, double car_y, double car_s, double car_d,
-    double car_yaw, double car_speed);
+  void setEgoVehicleData(Vehicle v);
   void update(vector<Vehicle> others,
     vector<double>& prev_x_vals, vector<double>& prev_y_vals, double end_path_s,
     double end_path_d, vector<double>& next_x_vals,

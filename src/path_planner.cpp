@@ -20,19 +20,12 @@ PathPlanner::PathPlanner(Road& road, Vehicle& vehicle):
   road_(road),ego_(vehicle),
   targetLaneId_(Road::LANE_NOT_FOUND) {}
 
-void PathPlanner::setEgoVehicleData(double car_x, double car_y, double car_s,
-    double car_d, double car_yaw, double car_speed) {
-  ego_.x_ = car_x;
-  ego_.y_ = car_y;
-  ego_.s_ = car_s;
-  ego_.d_ = car_d;
-  ego_.yaw_ = car_yaw;
-  ego_.v_ = car_speed;
-  ego_.lane_ = road_.getLaneId(car_s, car_d);
+void PathPlanner::setEgoVehicleData(Vehicle vehicle) {
+  ego_ = vehicle;
 }
 
-bool PathPlanner::canChangeLane(vector<Vehicle> others,
-    Vehicle::PredictionState state, double delta_t, int target_lane) {
+bool PathPlanner::canChangeLane(Vehicle ego, vector<Vehicle> others,
+    double delta_t, int target_lane) {
   if (target_lane == Road::LANE_NOT_FOUND) {
     return false;
   }
@@ -42,10 +35,10 @@ bool PathPlanner::canChangeLane(vector<Vehicle> others,
       continue;
     }
 
-    const double s = v.stateAt(delta_t).s;
-    const double dist = fabs(s - state.s);
-    bool inFront = state.s < s && dist < 20;
-    bool behind = state.s > s && dist < 10;
+    const double s = v.stateAt(delta_t).s_;
+    const double dist = fabs(s - ego.s_);
+    bool inFront = ego.s_ < s && dist < 20;
+    bool behind = ego.s_ > s && dist < 10;
     if (inFront || behind) {
         return false;
     }
@@ -125,9 +118,9 @@ void PathPlanner::update(vector<Vehicle> others,
       continue;
     }
 
-    const double s = v.stateAt(ref_t).s;
+    const double s = v.stateAt(ref_t).s_;
     if (s > ref_s && (s - ref_s < 30)) { // A car in front of us
-      if (inFront == NULL || inFront->stateAt(ref_t).s > s) {
+      if (inFront == NULL || inFront->stateAt(ref_t).s_ > s) {
         inFront = new Vehicle(v);
       }
     }
@@ -138,19 +131,17 @@ void PathPlanner::update(vector<Vehicle> others,
   time_t now = time(NULL);
   if (inFront != NULL && ego_.lane_ == targetLaneId_ &&
       difftime(now, lastLaneChange_) > 5 /* seconds */) {
-    Vehicle::PredictionState pred_state;
-    pred_state.lane = ego_.lane_;
-    pred_state.s = ref_s;
-    pred_state.d = ref_d;
-    pred_state.v = ref_v;
-    pred_state.a = 0;
+    Vehicle pred_v = Vehicle(ego_);
+    pred_v.s_ = ref_s;
+    pred_v.d_ = ref_d;
+    pred_v.v_ = ref_v;
 
     const int left_lane = road_.getLaneLeftTo(ego_.lane_, ref_s);
     const int right_lane = road_.getLaneRightTo(ego_.lane_, ref_s);
-    if (canChangeLane(others, pred_state, ref_t, left_lane)) {
+    if (canChangeLane(pred_v, others, ref_t, left_lane)) {
       targetLaneId_ = left_lane;
       lastLaneChange_ = time(NULL);
-    } else if (canChangeLane(others, pred_state, ref_t, right_lane)) {
+    } else if (canChangeLane(pred_v, others, ref_t, right_lane)) {
       targetLaneId_ = right_lane;
       lastLaneChange_ = time(NULL);
     }

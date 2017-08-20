@@ -40,23 +40,15 @@ void toVehicles(Road& road, json& sensor_fusion, vector<Vehicle>& out) {
     vehicle.id_ = data[0];
     vehicle.x_ = data[1];
     vehicle.y_ = data[2];
-    vehicle.vx_ = data[3]; // Already in m/s
-    vehicle.vy_ = data[4]; // Already in m/s
+    double vx = data[3]; // Already in m/s
+    double vy = data[4]; // Already in m/s
     vehicle.s_ = data[5];
     vehicle.d_ = data[6];
-    vehicle.v_ = sqrt(vehicle.vx_*vehicle.vx_ + vehicle.vy_*vehicle.vy_);
-    vehicle.a_ = 0;
-    vehicle.d_dot_ = 0;
-    vehicle.d_dot_dot_ = 0;
+    vehicle.v_ = sqrt(vx*vx + vy*vy);
+    vehicle.a_ = 0; // Ignore acceleration
+    vehicle.yaw_ = atan2(vx, vy);
     vehicle.lane_ = road.getLaneId(vehicle.s_, vehicle.d_);
     out.push_back(vehicle);
-  }
-}
-
-// Converts a json array of double to a vector<double>
-void toVectorDouble(json& in, vector<double>& out) {
-  for (const auto& value: in) {
-    out.push_back(value);
   }
 }
 
@@ -125,21 +117,27 @@ int main() {
           	double car_speed = j[1]["speed"]; // mph to m/s conversion
           	car_speed *= MPH2MS;
 
+            Vehicle ego;
+            ego.x_ = car_x;
+            ego.y_ = car_y;
+            ego.s_ = car_s;
+            ego.d_ = car_d;
+            ego.yaw_ = car_yaw;
+            ego.v_ = car_speed;
+            ego.lane_ = road.getLaneId(car_s, car_d);
+
+            // Update current vehicle information
+            pathPlanner.setEgoVehicleData(ego);
+
           	// Previous path data given to the Planner
-          	auto previous_path_x = j[1]["previous_path_x"];
-          	auto previous_path_y = j[1]["previous_path_y"];
+          	auto previous_path_x = j[1]["previous_path_x"].get<vector<double>>();
+          	auto previous_path_y = j[1]["previous_path_y"].get<vector<double>>();
           	// Previous path's end s and d values
           	double end_path_s = j[1]["end_path_s"];
           	double end_path_d = j[1]["end_path_d"];
 
           	// Sensor Fusion Data, a list of all other cars on the same side of the road.
           	auto sensor_fusion = j[1]["sensor_fusion"];
-
-            // Convert previous_path_x to vector<double>
-            vector<double> prev_x_vals;
-          	vector<double> prev_y_vals;
-            toVectorDouble(previous_path_x, prev_x_vals);
-            toVectorDouble(previous_path_y, prev_y_vals);
 
             // Convert sensor_fusion to vehicles objects
             vector<Vehicle> vehicles;
@@ -150,12 +148,9 @@ int main() {
           	vector<double> next_x_vals;
           	vector<double> next_y_vals;
 
-            // Update current vehicle information
-            pathPlanner.setEgoVehicleData(car_x, car_y, car_s, car_d, car_yaw,
-              car_speed);
             // Generate new path
-            pathPlanner.update(vehicles, prev_x_vals, prev_y_vals, end_path_s,
-              end_path_d, next_x_vals, next_y_vals);
+            pathPlanner.update(vehicles, previous_path_x, previous_path_y,
+              end_path_s, end_path_d, next_x_vals, next_y_vals);
 
           	msgJson["next_x"] = next_x_vals;
           	msgJson["next_y"] = next_y_vals;
